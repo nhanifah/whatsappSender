@@ -1,4 +1,4 @@
-const { Connection } = require('rabbitmq-client');
+const mariadb = require('mariadb');
 const { Client } = require('whatsapp-web.js');
 const { Buttons, List } =  require('whatsapp-web.js/src/structures');
 const { createCanvas, loadImage } = require("canvas");
@@ -41,67 +41,91 @@ whatsappClient.initialize();
 
 
 whatsappClient.on('qr', qrData => {
-    console.log('QR code generated');
-    console.log('please refresh the page contain qr code');
+    console.log('[WHATSAPP] QR code generated');
+    console.log('[WHATSAPP] please refresh the page contain qr code');
     qrCode = qrData;
 });
 whatsappClient.on('authenticated', () => {
-    console.log('User is authenticated');
+    console.log('[WHATSAPP] User is authenticated');
     authenticated = true;
 });
 whatsappClient.on('auth_failure', () => {
-    console.log('Authentication failed');
+    console.log('[WHATSAPP] Authentication failed');
     authenticated = false;
 });
 
 whatsappClient.on('loading_screen', (percent, message) => {
-    console.log('LOADING SCREEN', percent, message);
+    console.log('[WHATSAPP] LOADING SCREEN', percent, message);
 });
 
 // emit when whatsapp is on ready state
 whatsappClient.on('ready', async () => {
-    console.log('WhatsApp is ready');
+    console.log('[WHATSAPP] WhatsApp is ready');
     qrCode = null;
     authenticated = true;
+    let loopTime = await generateRandomNumber();
+
+    // Handle sending message service
+    setInterval(async () => {
+        console.log(`[DATABASE] Get new message in ${loopTime} milisecond`);
+        const rows = await asyncFunction();
+        
+        if (rows.length > 0) {
+            // console.log(rows[0].id);
+            // decode JSON payload
+            const payload = JSON.parse(rows[0].payload);
+            try {
+                await whatsappClient.sendMessage(
+                    payload.whatsapp+"@c.us",
+                    payload.message
+                );
+                await asyncUpdate(rows[0].id,'success');
+                console.log('[DATABASE] send message to', payload.whatsapp);
+                console.log('[DATABASE] message:', payload.message);
+            } catch (e) {
+                console.log("[DATABASE]",e);
+                await asyncUpdate(rows[0].id,'failed');
+            }
+        }
+        loopTime = await generateRandomNumber();
+    }, loopTime);
 });
 
-whatsappClient.on('message', async message => {
-    // check if message from specific number
-    if (message.from === '6287816661906@c.us') {
-        let btn = new Buttons('Pilih oshi yang kamu suka!', [{body:'Freya'},{body:'zee'}], 'Opsi yang bisa dipilih', 'Dikelola oleh Polda Metrojaya');
-        let list = new List('Hello woody', 'Opsi yang bisa dipilih', [{title: 'Bukti', rows: [{id: 'customId', title: 'Hari Ini', description: 'desc'}, {title: 'Besok'}]}], 'Penyitaan alat bukti', 'Dikirim oleh Polda Metrojaya');
-        // identify when first message contain text !check by regex
-        if (message.body.match(/^!check/)) {
-            // get contact by id
-            let number = message.body.split(' ')[1]+"@c.us";
-            console.log(number);
-            let contact = await whatsappClient.getContactById(number);
-            console.log(contact)
-            // send message to contact
-
-        }
-        await whatsappClient.sendMessage(
-            message.from,
-            list
-        );
-        await whatsappClient.sendMessage(
-            message.from,
-            btn
-        );
-        console.log('send payment message to', message.from);
-    }
-
-    console.log("receive new message from", message.from);
-})
+// whatsappClient.on('message', async message => {
+//     // check if message from specific number
+//     if (message.from === '6287816661906@c.us') {
+//         let btn = new Buttons('Pilih oshi yang kamu suka!', [{body:'Freya'},{body:'zee'}], 'Opsi yang bisa dipilih', 'Dikelola oleh Polda Metrojaya');
+//         let list = new List('Hello woody', 'Opsi yang bisa dipilih', [{title: 'Bukti', rows: [{id: 'customId', title: 'Hari Ini', description: 'desc'}, {title: 'Besok'}]}], 'Penyitaan alat bukti', 'Dikirim oleh Polda Metrojaya');
+//         // identify when first message contain text !check by regex
+//         if (message.body.match(/^!check/)) {
+//             // get contact by id
+//             let number = message.body.split(' ')[1]+"@c.us";
+//             console.log(number);
+//             let contact = await whatsappClient.getContactById(number);
+//             console.log(contact)
+//             // send message to contact
+//
+//         }
+//         await whatsappClient.sendMessage(
+//             message.from,
+//             list
+//         );
+//         await whatsappClient.sendMessage(
+//             message.from,
+//             btn
+//         );
+//         console.log('send payment message to', message.from);
+//     }
+// })
 
 // emit when whatsapp is logged out
 whatsappClient.on('disconnected', () => {
-    console.log('WhatsApp is disconnected');
+    console.log('[WHATSAPP] WhatsApp is disconnected');
     qrCode = null;
     authenticated = false;
 });
 app.listen(3000, () => {
-    console.log('Server is running on http://localhost:3000');
+    console.log('[SERVER] Server is running on http://localhost:3000');
 });
 
 // create function add logo in qr code
@@ -135,4 +159,29 @@ async function generateQRWithLogo(dataForQRcode, center_image, width, cwidth) {
     fingerprint = Buffer.concat([fingerprint, buf]);
     // return canvas.toDataURL("image/png");
     return fingerprint;
+}
+
+async function asyncFunction() {
+    const conn = await mariadb.createConnection({host: config.db.host, user: config.db.user, password: config.db.password, database: config.db.database});
+    try {
+        return await conn.query(`SELECT * from job WHERE status = 'pending' AND job_type = 'whatsapp' ORDER BY created_at ASC LIMIT 1`);
+
+    } finally {
+        conn.end();
+    }
+}
+
+async function asyncUpdate(id,status) {
+    const conn = await mariadb.createConnection({host: config.db.host, user: config.db.user, password: config.db.password, database: config.db.database});
+    try {
+        return await conn.query(`UPDATE job SET status = '${status}' WHERE id = '${id}'`);
+
+    }
+    finally {
+        conn.end();
+    }
+}
+
+async function generateRandomNumber() {
+    return Math.floor(Math.random() * (10000 - 2000 + 1)) + 2000;
 }
