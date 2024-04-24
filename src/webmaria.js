@@ -133,6 +133,8 @@ whatsappClient.on('ready', async () => {
             // console.log(rows[0].id);
             // decode JSON payload
             const payload = JSON.parse(rows[0].payload.replace(/\n/g, '\\n'));
+            // decode message from base64 to utf-8
+            payload.message = Buffer.from(payload.message, 'base64').toString('utf-8');
             try {
                 await whatsappClient.sendMessage(
                     payload.whatsapp + "@c.us",
